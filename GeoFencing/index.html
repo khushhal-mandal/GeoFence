@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoFencing - Device Tracker</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" type="text/css" href="css/style.css"/>
+</head>
+<body>
+    <!-- Alert Border Overlay -->
+    <div id="alert-border"></div>
+    
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+    
+    <div id="app-container">
+        <!-- Header -->
+        <div id="header">
+            <h1>GeoFencing - Device Tracker</h1>
+            <div id="header-controls">
+                <button id="fullscreen-btn" class="header-btn" title="Toggle Fullscreen (Press F)">
+                    <span>⛶</span>
+                </button>
+                <button id="sound-btn" class="header-btn active" title="Toggle Sound">
+                    <span id="sound-icon">🔊</span>
+                </button>
+                <div id="connection-status">
+                    <span id="status-indicator" class="disconnected"></span>
+                    <span id="status-text">Disconnected</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div id="main-content">
+            <!-- Map Container -->
+            <div id="map-container">
+                <div id="map"></div>
+            </div>
+            
+            <!-- Sidebar -->
+            <div id="sidebar">
+                <!-- Center Location Info -->
+                <div class="panel">
+                    <h3>Center Location</h3>
+                    <p id="center-name">Samsung R&D Institute, Noida Sector 126</p>
+                    <p id="center-coords">28.5445° N, 77.3340° E</p>
+                </div>
+                
+                <!-- Geofence Settings -->
+                <div class="panel">
+                    <h3>Geofence Settings</h3>
+                    <div class="setting-row">
+                        <label>Radius:</label>
+                        <span id="radius-value">200 meters</span>
+                    </div>
+                </div>
+                
+                <!-- Server Settings -->
+                <div class="panel focusable-panel" tabindex="0">
+                    <h3>Server Connection</h3>
+                    <div class="setting-row">
+                        <label>Server IP:</label>
+                        <input type="text" id="server-ip" value="192.168.1.100" class="focusable" tabindex="0" />
+                    </div>
+                    <div class="setting-row">
+                        <label>Port:</label>
+                        <input type="text" id="server-port" value="8080" class="focusable" tabindex="0" />
+                    </div>
+                    <button id="connect-btn" class="btn focusable" tabindex="0">Connect</button>
+                </div>
+                
+                <!-- Connected Devices -->
+                <div class="panel">
+                    <h3>Connected Devices</h3>
+                    <div id="device-count">0 devices</div>
+                    <div id="device-list"></div>
+                </div>
+                
+                <!-- Statistics -->
+                <div class="panel">
+                    <h3>Statistics</h3>
+                    <div class="stat-row">
+                        <span class="stat-label">Inside Geofence:</span>
+                        <span id="inside-count" class="stat-value inside">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Outside Geofence:</span>
+                        <span id="outside-count" class="stat-value outside">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div id="footer">
+            <p>
+                <span class="key">BACK</span> Exit | 
+                <span class="key">↑↓←→</span> Navigate | 
+                <span class="key">F</span> Fullscreen | 
+                <span class="key">M</span> Mute
+            </p>
+        </div>
+    </div>
+    
+    <!-- Alert Sound (base64 encoded beep) -->
+    <audio id="alert-sound" preload="auto">
+        <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2LjY2Coverage+Yk1NT3B9hIiJh4J9fn6Cf4WKjIqGgX59fX5/g4iLjImFgH19fX6AhImMi4iBfX19fX+DhomKh4R/fX5+gIOHiYqIhYGAfn+AgoaIiIeFgX9+foCChIaHhoSDgH5+foCChIWGhYOAfn5+f4GDhYWFg4F/fn5/gIKEhYSDgYB+fn5/gYKEhIOCgH9+fn+AgoOEg4KAf35+f4CCg4OCgYB/fn5/gIKDg4OBgH9+fn+AgYKCgoGAf35+f4CBgoKCgYB/fn5/gIGBgoGAgH9+fn+AgYGBgYCAf39+f4CAgYGBgIB/f35/gICBgYCAgH9/fn+AgIGBgICAf39/f4CAgYCAgIB/f39/gICAgICAf39/f39/gICAgIB/f39/f3+AgICAgH9/f39/f4CAgIB/f39/f39/gICAgH9/f39/f3+AgICAf39/f39/f4CAgIB/f39/f39/gICAgH9/f39/f39/gICAf39/f39/f3+AgIB/f39/f39/f4CAgH9/f39/f39/gICAf39/f39/f39/gIB/f39/f39/f3+AgH9/f39/f39/f4CAf39/f39/f39/gIB/f39/f39/f39/gH9/f39/f39/f3+Af39/f39/f39/f4B/f39/f39/f39/gH9/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/fw==" type="audio/wav">
+    </audio>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Main JS -->
+    <script src="./main.js"></script>
+</body>
+</html>
