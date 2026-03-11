@@ -1,66 +1,78 @@
 package com.example.geolocation
 
 import android.util.Log
+import org.java_websocket.WebSocket
+import org.java_websocket.handshake.ClientHandshake
+import org.java_websocket.server.WebSocketServer
 import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.Socket
-import kotlin.concurrent.thread
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
 
 /**
- * Simple WebSocket server for Android (for demo/testing only).
- * Accepts one client (TV web app) at a time.
- * Only handles basic text frames (not production-ready).
+ * Proper WebSocket server for Android using Java-WebSocket library.
+ * Accepts connections from the Tizen TV web app on the same WiFi.
  */
-class SimpleWebSocketServer(private val port: Int, private val onMessage: (String) -> Unit) {
-    private var serverThread: Thread? = null
-    private var running = false
-    var clientAddress: String? = null
+class SimpleWebSocketServer(
+    port: Int,
+    private val onMessage: (String) -> Unit,
+    private val onClientConnected: (String) -> Unit = {},
+    private val onClientDisconnected: (String) -> Unit = {}
+) : WebSocketServer(InetSocketAddress(port)) {
 
-    fun start() {
-        running = true
-        serverThread = thread {
-            try {
-                val serverSocket = ServerSocket(port)
-                Log.d("WebSocketServer", "Listening on port $port")
-                while (running) {
-                    val socket = serverSocket.accept()
-                    clientAddress = socket.inetAddress.hostAddress
-                    Log.d("WebSocketServer", "Client connected: $clientAddress")
-                    handleClient(socket)
-                }
-                serverSocket.close()
-            } catch (e: Exception) {
-                Log.e("WebSocketServer", "Error: ${e.message}")
-            }
+    var clientAddress: String? = null
+        private set
+
+    override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
+        val addr = conn.remoteSocketAddress?.address?.hostAddress ?: "unknown"
+        clientAddress = addr
+        Log.d("WebSocketServer", "Client connected: $addr")
+        onClientConnected(addr)
+    }
+
+    override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
+        val addr = conn.remoteSocketAddress?.address?.hostAddress ?: "unknown"
+        Log.d("WebSocketServer", "Client disconnected: $addr")
+        onClientDisconnected(addr)
+        if (connections.isEmpty()) {
+            clientAddress = null
         }
     }
 
-    fun stop() {
-        running = false
-        serverThread?.interrupt()
-        serverThread = null
+    override fun onMessage(conn: WebSocket, message: String) {
+        Log.d("WebSocketServer", "Received: $message")
+        onMessage(message)
+
+        // Handle register messages from TV and send confirmation
+        try {
+            val json = org.json.JSONObject(message)
+            if (json.optString("type") == "register") {
+                val response = org.json.JSONObject().apply {
+                    put("type", "registered")
+                    put("clientId", json.optString("appName", "tv-client"))
+                    put("serverTime", System.currentTimeMillis())
+                }
+                conn.send(response.toString())
+            }
+        } catch (e: Exception) {
+            Log.e("WebSocketServer", "Error handling message: ${e.message}")
+        }
     }
 
-    private fun handleClient(socket: Socket) {
-        thread {
-            try {
-                val input = socket.getInputStream()
-                val output = socket.getOutputStream()
-                // Minimal handshake (not full RFC)
-                val reader = input.bufferedReader()
-                val request = reader.readLine()
-                if (request.contains("Upgrade: websocket")) {
-                    // Accept handshake (simplified)
-                    output.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".toByteArray())
-                }
-                // Read text frames (very basic)
-                while (running) {
-                    val line = reader.readLine() ?: break
-                    onMessage(line)
-                }
-                socket.close()
-            } catch (e: Exception) {
-                Log.e("WebSocketServer", "Client error: ${e.message}")
+    override fun onError(conn: WebSocket?, ex: Exception) {
+        Log.e("WebSocketServer", "Error: ${ex.message}")
+    }
+
+    override fun onStart() {
+        Log.d("WebSocketServer", "Server started on port $port")
+    }
+
+    /**
+     * Broadcast a message to all connected clients.
+     */
+    fun broadcast(message: String) {
+        connections.forEach { conn ->
+            if (conn.isOpen) {
+                conn.send(message)
             }
         }
     }
@@ -68,8 +80,18 @@ class SimpleWebSocketServer(private val port: Int, private val onMessage: (Strin
     companion object {
         fun getLocalIpAddress(): String? {
             return try {
-                val inetAddress = InetAddress.getLocalHost()
-                inetAddress.hostAddress
+                val interfaces = NetworkInterface.getNetworkInterfaces()
+                while (interfaces.hasMoreElements()) {
+                    val networkInterface = interfaces.nextElement()
+                    val addresses = networkInterface.inetAddresses
+                    while (addresses.hasMoreElements()) {
+                        val address = addresses.nextElement()
+                        if (!address.isLoopbackAddress && address is java.net.Inet4Address) {
+                            return address.hostAddress
+                        }
+                    }
+                }
+                null
             } catch (e: Exception) {
                 null
             }

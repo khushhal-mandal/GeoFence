@@ -47,8 +47,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     
-    // OkHttp for WebSocket
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Java-WebSocket server library
+    implementation("org.java-websocket:Java-WebSocket:1.5.6")
     
     // Gson for JSON
     implementation("com.google.code.gson:gson:2.10.1")

@@ -102,7 +102,7 @@ function initializeMap() {
     });
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
+        attribution: 'ï¿½ OpenStreetMap contributors',
         maxZoom: 19
     }).addTo(map);
     
@@ -500,6 +500,10 @@ function handleServerMessage(data) {
                 clearAllDevices();
                 break;
                 
+            case 'registered':
+                console.log('Registered with server, clientId:', message.clientId);
+                break;
+                
             default:
                 console.log('Unknown message type:', message.type);
         }
@@ -588,7 +592,7 @@ function updateStatistics() {
 function updateUI() {
     document.getElementById('center-name').textContent = CONFIG.CENTER.name;
     document.getElementById('center-coords').textContent = 
-        `${CONFIG.CENTER.lat.toFixed(4)}° N, ${CONFIG.CENTER.lng.toFixed(4)}° E`;
+        `${CONFIG.CENTER.lat.toFixed(4)}ï¿½ N, ${CONFIG.CENTER.lng.toFixed(4)}ï¿½ E`;
     document.getElementById('radius-value').textContent = `${CONFIG.RADIUS} meters`;
 }
 
