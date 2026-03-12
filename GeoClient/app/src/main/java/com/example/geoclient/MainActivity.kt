@@ -1,15 +1,11 @@
 package com.example.geoclient
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Looper
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,12 +18,303 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.example.geoclient.ui.theme.GeoClientTheme
-import com.google.android.gms.location.*
 import okhttp3.*
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
+
+class MainActivity : ComponentActivity() {
+
+    private val centerLat = 28.5445
+    private val centerLng = 77.3340
+    private val radiusMeters = 200.0
+
+    private var webSocket: WebSocket? = null
+    private val okHttpClient = OkHttpClient.Builder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
+    private var _isConnected = mutableStateOf(false)
+    private var _logMessages = mutableStateOf(listOf<String>())
+    private var _lastSent = mutableStateOf("")
+
+    private val deviceId: String by lazy {
+        "phone-${Build.MANUFACTURER}-${Build.MODEL}".replace(" ", "_")
+    }
+    private val deviceName: String by lazy {
+        "${Build.MANUFACTURER} ${Build.MODEL}"
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            GeoClientTheme {
+                GeoClientApp()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        disconnectWebSocket()
+    }
+
+    private fun addLog(message: String) {
+        Log.d("GeoClient", message)
+        _logMessages.value = (listOf(message) + _logMessages.value).take(20)
+    }
+
+    private fun generateInsideLocation(): Pair<Double, Double> {
+        val r = radiusMeters * 0.8 * Random.nextDouble()
+        val angle = Random.nextDouble() * 2 * Math.PI
+        val dLat = (r * cos(angle)) / 111320.0
+        val dLng = (r * sin(angle)) / (111320.0 * cos(Math.toRadians(centerLat)))
+        return Pair(centerLat + dLat, centerLng + dLng)
+    }
+
+    private fun generateOutsideLocation(): Pair<Double, Double> {
+        val r = radiusMeters + 50 + Random.nextDouble() * 300
+        val angle = Random.nextDouble() * 2 * Math.PI
+        val dLat = (r * cos(angle)) / 111320.0
+        val dLng = (r * sin(angle)) / (111320.0 * cos(Math.toRadians(centerLat)))
+        return Pair(centerLat + dLat, centerLng + dLng)
+    }
+
+    private fun connectWebSocket(serverIp: String, serverPort: String) {
+        if (_isConnected.value) return
+        val url = "ws://$serverIp:$serverPort"
+        addLog("Connecting to $url...")
+
+        val request = Request.Builder().url(url).build()
+        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                _isConnected.value = true
+                addLog("Connected to server!")
+                val registerMsg = JSONObject().apply {
+                    put("type", "register")
+                    put("clientType", "phone")
+                    put("deviceId", deviceId)
+                    put("deviceName", deviceName)
+                }
+                webSocket.send(registerMsg.toString())
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                addLog("Server: $text")
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                _isConnected.value = false
+                addLog("Disconnected from server")
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                _isConnected.value = false
+                addLog("Connection failed: ${t.message}")
+            }
+        })
+    }
+
+    private fun disconnectWebSocket() {
+        webSocket?.close(1000, "Client closing")
+        webSocket = null
+        _isConnected.value = false
+    }
+
+    private fun sendLocation(inside: Boolean) {
+        val (lat, lng) = if (inside) generateInsideLocation() else generateOutsideLocation()
+        val msg = JSONObject().apply {
+            put("type", "location")
+            put("deviceId", deviceId)
+            put("deviceName", deviceName)
+            put("lat", lat)
+            put("lng", lng)
+        }
+        webSocket?.send(msg.toString())
+        val label = if (inside) "INSIDE" else "OUTSIDE"
+        _lastSent.value = "$label: (${String.format("%.6f", lat)}, ${String.format("%.6f", lng)})"
+        addLog("Sent $label: ${String.format("%.6f", lat)}, ${String.format("%.6f", lng)}")
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun GeoClientApp() {
+        var serverIp by remember { mutableStateOf("") }
+        var serverPort by remember { mutableStateOf("8080") }
+        val isConnected by _isConnected
+        val logMessages by _logMessages
+        val lastSent by _lastSent
+
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color(0xFF1a1a2e)
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "GeoFence Client",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4ECDC4),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                Text(
+                    text = deviceName,
+                    fontSize = 14.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                // Connection Card
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213e)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Server Connection", color = Color(0xFF4ECDC4), fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = serverIp,
+                            onValueChange = { serverIp = it },
+                            label = { Text("Server IP Address") },
+                            placeholder = { Text("e.g. 192.168.1.5") },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF4ECDC4),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF4ECDC4),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            enabled = !isConnected
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = serverPort,
+                            onValueChange = { serverPort = it },
+                            label = { Text("Port") },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF4ECDC4),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedLabelColor = Color(0xFF4ECDC4),
+                                unfocusedLabelColor = Color.Gray
+                            ),
+                            enabled = !isConnected
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                if (isConnected) disconnectWebSocket()
+                                else connectWebSocket(serverIp, serverPort)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isConnected) Color(0xFFe74c3c) else Color(0xFF27ae60)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            enabled = isConnected || serverIp.isNotBlank()
+                        ) {
+                            Text(if (isConnected) "Disconnect" else "Connect to Server")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (isConnected) "Connected" else "Disconnected",
+                            color = if (isConnected) Color(0xFF27ae60) else Color(0xFFe74c3c),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Send Location Card
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213e)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Send Location", color = Color(0xFF4ECDC4), fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Center: $centerLat, $centerLng\nRadius: ${radiusMeters.toInt()}m",
+                            color = Color.Gray,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = { sendLocation(inside = true) },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27ae60)),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = isConnected
+                            ) {
+                                Text("Send Inside", fontSize = 14.sp)
+                            }
+                            Button(
+                                onClick = { sendLocation(inside = false) },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFe74c3c)),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = isConnected
+                            ) {
+                                Text("Send Outside", fontSize = 14.sp)
+                            }
+                        }
+                        if (lastSent.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Last: $lastSent", color = Color.Gray, fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                // Log Card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .heightIn(min = 150.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213e)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Log", color = Color(0xFF4ECDC4), fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        logMessages.forEach { msg ->
+                            Text(
+                                text = msg,
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 class MainActivity : ComponentActivity() {
 

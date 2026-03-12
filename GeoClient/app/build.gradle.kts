@@ -50,9 +50,6 @@ dependencies {
     // OkHttp WebSocket client
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Google Play Services Location
-    implementation(libs.play.services.location)
-
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
