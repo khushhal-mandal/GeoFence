@@ -142,16 +142,19 @@ function createCenterIcon() {
     });
 }
 
-function createDeviceIcon(color, isInside) {
-    const borderColor = isInside ? '#27ae60' : '#e74c3c';
+function createDeviceIcon(color, isInside, deviceName, isOffline) {
+    const borderColor = isOffline ? '#95a5a6' : (isInside ? '#27ae60' : '#e74c3c');
+    const bgColor = isOffline ? '#7f8c8d' : color;
+    const label = deviceName || '';
     return L.divIcon({
         className: 'device-marker',
-        html: `<div class="device-marker-inner" style="background-color: ${color}; border-color: ${borderColor};">
-                 <div class="device-marker-pin" style="border-top-color: ${color};"></div>
+        html: `<div class="device-marker-label">${label}</div>
+               <div class="device-marker-inner" style="background-color: ${bgColor}; border-color: ${borderColor};">
+                 <div class="device-marker-pin" style="border-top-color: ${bgColor};"></div>
                </div>`,
-        iconSize: [24, 32],
-        iconAnchor: [12, 32],
-        popupAnchor: [0, -32]
+        iconSize: [24, 50],
+        iconAnchor: [12, 50],
+        popupAnchor: [0, -50]
     });
 }
 
@@ -183,6 +186,35 @@ function isInsideGeofence(lat, lng) {
 }
 
 // =====================================================
+// REVERSE GEOCODING
+// =====================================================
+
+function reverseGeocode(lat, lng) {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+    return fetch(url, {
+        headers: { 'Accept-Language': 'en' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data && data.address) {
+            const a = data.address;
+            // Build a human-readable short name
+            const parts = [];
+            if (a.road) parts.push(a.road);
+            if (a.neighbourhood) parts.push(a.neighbourhood);
+            else if (a.suburb) parts.push(a.suburb);
+            if (a.city || a.town || a.village) parts.push(a.city || a.town || a.village);
+            return parts.length > 0 ? parts.join(', ') : (data.display_name || 'Unknown area');
+        }
+        return 'Unknown area';
+    })
+    .catch(err => {
+        console.error('Reverse geocode error:', err);
+        return 'Unknown area';
+    });
+}
+
+// =====================================================
 // DEVICE MANAGEMENT
 // =====================================================
 
@@ -194,26 +226,28 @@ function updateDeviceLocation(deviceId, lat, lng, deviceName) {
     if (devices.has(deviceId)) {
         const device = devices.get(deviceId);
         device.marker.setLatLng([lat, lng]);
-        device.marker.setIcon(createDeviceIcon(device.color, isInside));
+        device.marker.setIcon(createDeviceIcon(device.color, isInside, deviceName, false));
         device.data = { lat, lng, name: deviceName, distance, timestamp: Date.now() };
         device.isInside = isInside;
+        device.isOffline = false;
         device.lastUpdate = Date.now();
-        device.marker.setPopupContent(createDevicePopup(deviceId, deviceName, lat, lng, distance, isInside));
+        device.marker.setPopupContent(createDevicePopup(deviceId, deviceName, lat, lng, distance, isInside, null));
     } else {
         const color = DEVICE_COLORS[colorIndex % DEVICE_COLORS.length];
         colorIndex++;
         
         const marker = L.marker([lat, lng], {
-            icon: createDeviceIcon(color, isInside)
+            icon: createDeviceIcon(color, isInside, deviceName, false)
         }).addTo(map);
         
-        marker.bindPopup(createDevicePopup(deviceId, deviceName, lat, lng, distance, isInside));
+        marker.bindPopup(createDevicePopup(deviceId, deviceName, lat, lng, distance, isInside, null));
         
         devices.set(deviceId, {
             marker,
             color,
             data: { lat, lng, name: deviceName, distance, timestamp: Date.now() },
             isInside,
+            isOffline: false,
             lastUpdate: Date.now()
         });
     }
@@ -227,28 +261,54 @@ function updateDeviceLocation(deviceId, lat, lng, deviceName) {
     updateStatistics();
 }
 
-function createDevicePopup(deviceId, deviceName, lat, lng, distance, isInside) {
-    const status = isInside ? 
-        '<span style="color: #27ae60;">? Inside Geofence</span>' : 
-        '<span style="color: #e74c3c;">? Outside Geofence</span>';
+function createDevicePopup(deviceId, deviceName, lat, lng, distance, isInside, areaName) {
+    let status;
+    if (areaName !== undefined && areaName !== null) {
+        status = '<span style="color: #95a5a6;">Offline</span>';
+    } else {
+        status = isInside ? 
+            '<span style="color: #27ae60;">Inside Geofence</span>' : 
+            '<span style="color: #e74c3c;">Outside Geofence</span>';
+    }
+    
+    let areaInfo = '';
+    if (areaName) {
+        areaInfo = `<br><em style="color:#f39c12;">Last seen near: ${areaName}</em>`;
+    }
     
     return `
         <strong>${deviceName || deviceId}</strong><br>
         ${status}<br>
         Distance: ${distance.toFixed(1)}m<br>
         Lat: ${lat.toFixed(6)}<br>
-        Lng: ${lng.toFixed(6)}
+        Lng: ${lng.toFixed(6)}${areaInfo}
     `;
 }
 
-function removeDevice(deviceId) {
+function removeDevice(deviceId, lastLat, lastLng) {
     if (devices.has(deviceId)) {
         const device = devices.get(deviceId);
-        map.removeLayer(device.marker);
-        devices.delete(deviceId);
+        const name = device.data.name || deviceId;
+        const lat = lastLat || device.data.lat;
+        const lng = lastLng || device.data.lng;
+        
+        // Mark as offline instead of removing — keep pin grayed out
+        device.isOffline = true;
+        device.marker.setIcon(createDeviceIcon(device.color, device.isInside, name, true));
+        
+        // Reverse geocode to get area name
+        reverseGeocode(lat, lng).then(areaName => {
+            device.marker.setPopupContent(
+                createDevicePopup(deviceId, name, lat, lng, device.data.distance, device.isInside, areaName)
+            );
+            showToast(
+                `${name} disconnected<br>Last seen near: ${areaName}`,
+                'info'
+            );
+        });
+        
         updateDeviceList();
         updateStatistics();
-        showToast(`${device.data.name || deviceId} disconnected`, 'info');
     }
 }
 
@@ -272,7 +332,7 @@ function startDeviceTimeoutChecker() {
         const devicesToRemove = [];
         
         devices.forEach((device, deviceId) => {
-            if (now - device.lastUpdate > CONFIG.DEVICE_TIMEOUT) {
+            if (!device.isOffline && now - device.lastUpdate > CONFIG.DEVICE_TIMEOUT) {
                 devicesToRemove.push(deviceId);
             }
         });
@@ -493,7 +553,7 @@ function handleServerMessage(data) {
                 break;
                 
             case 'deviceDisconnected':
-                removeDevice(message.deviceId);
+                removeDevice(message.deviceId, message.lastLat, message.lastLng);
                 break;
                 
             case 'clearAll':
@@ -555,16 +615,27 @@ function updateDeviceList() {
     
     let html = '';
     devices.forEach((device, deviceId) => {
-        const statusClass = device.isInside ? 'inside' : 'outside';
-        const statusIcon = device.isInside ? '?' : '?';
-        const distance = device.data.distance.toFixed(0);
+        let statusClass, statusIcon, statusText;
+        if (device.isOffline) {
+            statusClass = 'offline';
+            statusIcon = '';
+            statusText = 'Offline';
+        } else if (device.isInside) {
+            statusClass = 'inside';
+            statusIcon = '';
+            statusText = `${device.data.distance.toFixed(0)}m`;
+        } else {
+            statusClass = 'outside';
+            statusIcon = '';
+            statusText = `${device.data.distance.toFixed(0)}m`;
+        }
         
         html += `
             <div class="device-item ${statusClass}" data-device-id="${deviceId}">
-                <div class="device-color" style="background-color: ${device.color}"></div>
+                <div class="device-color" style="background-color: ${device.isOffline ? '#7f8c8d' : device.color}"></div>
                 <div class="device-info">
                     <div class="device-name">${device.data.name || deviceId}</div>
-                    <div class="device-distance">${distance}m ${statusIcon}</div>
+                    <div class="device-distance">${statusText} ${statusIcon}</div>
                 </div>
             </div>
         `;

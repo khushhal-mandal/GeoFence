@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
                 put("lat", lat)
                 put("lng", lng)
             }
-            wsServer?.broadcast(msg.toString())
+            wsServer?.broadcastToTV(msg.toString())
             val label = if (inside) "INSIDE" else "OUTSIDE"
             lastSentLocation = "$label: (${String.format("%.6f", lat)}, ${String.format("%.6f", lng)})"
             addLog("Sent $label location: ${String.format("%.6f", lat)}, ${String.format("%.6f", lng)}")
