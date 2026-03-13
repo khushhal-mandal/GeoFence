@@ -349,12 +349,23 @@ function startDeviceTimeoutChecker() {
 // =====================================================
 
 function triggerOutsideAlert(deviceName, lat, lng, distance) {
-    // Show toast with coordinates
+    const safeName = deviceName || 'Unknown Device';
+
     showToast(
-        `?? OUTSIDE: ${deviceName}<br>` +
-        `Distance: ${distance.toFixed(0)}m<br>` +
-        `Lat: ${lat.toFixed(6)}<br>` +
-        `Lng: ${lng.toFixed(6)}`,
+        `<div class="toast-alert-card">` +
+        `<div class="toast-alert-header">` +
+        `<span class="toast-alert-icon">!</span>` +
+        `<div class="toast-alert-title-block">` +
+        `<div class="toast-alert-title">Device Left Geofence</div>` +
+        `<div class="toast-alert-subtitle">${safeName}</div>` +
+        `</div>` +
+        `</div>` +
+        `<div class="toast-alert-details">` +
+        `<div class="toast-alert-row"><span>Distance</span><strong>${distance.toFixed(0)} m</strong></div>` +
+        `<div class="toast-alert-row"><span>Latitude</span><strong>${lat.toFixed(6)}</strong></div>` +
+        `<div class="toast-alert-row"><span>Longitude</span><strong>${lng.toFixed(6)}</strong></div>` +
+        `</div>` +
+        `</div>`,
         'alert'
     );
     

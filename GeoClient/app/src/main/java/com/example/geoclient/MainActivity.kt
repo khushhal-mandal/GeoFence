@@ -6,12 +6,33 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,7 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.geoclient.ui.theme.GeoClientTheme
-import okhttp3.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.math.cos
@@ -37,13 +62,14 @@ class MainActivity : ComponentActivity() {
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
-    private var _isConnected = mutableStateOf(false)
-    private var _logMessages = mutableStateOf(listOf<String>())
-    private var _lastSent = mutableStateOf("")
+    private val isConnected = mutableStateOf(false)
+    private val logMessages = mutableStateOf(listOf<String>())
+    private val lastSent = mutableStateOf("")
 
     private val deviceId: String by lazy {
         "phone-${Build.MANUFACTURER}-${Build.MODEL}".replace(" ", "_")
     }
+
     private val deviceName: String by lazy {
         "${Build.MANUFACTURER} ${Build.MODEL}"
     }
@@ -65,35 +91,37 @@ class MainActivity : ComponentActivity() {
 
     private fun addLog(message: String) {
         Log.d("GeoClient", message)
-        _logMessages.value = (listOf(message) + _logMessages.value).take(20)
+        logMessages.value = (listOf(message) + logMessages.value).take(20)
     }
 
     private fun generateInsideLocation(): Pair<Double, Double> {
-        val r = radiusMeters * 0.8 * Random.nextDouble()
+        val distance = radiusMeters * 0.8 * Random.nextDouble()
         val angle = Random.nextDouble() * 2 * Math.PI
-        val dLat = (r * cos(angle)) / 111320.0
-        val dLng = (r * sin(angle)) / (111320.0 * cos(Math.toRadians(centerLat)))
+        val dLat = (distance * cos(angle)) / 111320.0
+        val dLng = (distance * sin(angle)) / (111320.0 * cos(Math.toRadians(centerLat)))
         return Pair(centerLat + dLat, centerLng + dLng)
     }
 
     private fun generateOutsideLocation(): Pair<Double, Double> {
-        val r = radiusMeters + 50 + Random.nextDouble() * 300
+        val distance = radiusMeters + 50 + Random.nextDouble() * 300
         val angle = Random.nextDouble() * 2 * Math.PI
-        val dLat = (r * cos(angle)) / 111320.0
-        val dLng = (r * sin(angle)) / (111320.0 * cos(Math.toRadians(centerLat)))
+        val dLat = (distance * cos(angle)) / 111320.0
+        val dLng = (distance * sin(angle)) / (111320.0 * cos(Math.toRadians(centerLat)))
         return Pair(centerLat + dLat, centerLng + dLng)
     }
 
     private fun connectWebSocket(serverIp: String, serverPort: String) {
-        if (_isConnected.value) return
+        if (isConnected.value) return
+
         val url = "ws://$serverIp:$serverPort"
         addLog("Connecting to $url...")
 
         val request = Request.Builder().url(url).build()
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                _isConnected.value = true
-                addLog("Connected to server!")
+                isConnected.value = true
+                addLog("Connected to server")
+
                 val registerMsg = JSONObject().apply {
                     put("type", "register")
                     put("clientType", "phone")
@@ -107,17 +135,13 @@ class MainActivity : ComponentActivity() {
                 addLog("Server: $text")
             }
 
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                webSocket.close(1000, null)
-            }
-
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                _isConnected.value = false
+                isConnected.value = false
                 addLog("Disconnected from server")
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                _isConnected.value = false
+                isConnected.value = false
                 addLog("Connection failed: ${t.message}")
             }
         })
@@ -126,11 +150,16 @@ class MainActivity : ComponentActivity() {
     private fun disconnectWebSocket() {
         webSocket?.close(1000, "Client closing")
         webSocket = null
-        _isConnected.value = false
+        isConnected.value = false
     }
 
     private fun sendLocation(inside: Boolean) {
-        val (lat, lng) = if (inside) generateInsideLocation() else generateOutsideLocation()
+        val (lat, lng) = if (inside) {
+            generateInsideLocation()
+        } else {
+            generateOutsideLocation()
+        }
+
         val msg = JSONObject().apply {
             put("type", "location")
             put("deviceId", deviceId)
@@ -138,24 +167,25 @@ class MainActivity : ComponentActivity() {
             put("lat", lat)
             put("lng", lng)
         }
+
         webSocket?.send(msg.toString())
         val label = if (inside) "INSIDE" else "OUTSIDE"
-        _lastSent.value = "$label: (${String.format("%.6f", lat)}, ${String.format("%.6f", lng)})"
+        lastSent.value = "$label: (${String.format("%.6f", lat)}, ${String.format("%.6f", lng)})"
         addLog("Sent $label: ${String.format("%.6f", lat)}, ${String.format("%.6f", lng)}")
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun GeoClientApp() {
+    private fun GeoClientApp() {
         var serverIp by remember { mutableStateOf("") }
         var serverPort by remember { mutableStateOf("8080") }
-        val isConnected by _isConnected
-        val logMessages by _logMessages
-        val lastSent by _lastSent
+        val connected by isConnected
+        val logs by logMessages
+        val last by lastSent
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color(0xFF1a1a2e)
+            containerColor = Color(0xFF1A1A2E)
         ) { innerPadding ->
             Column(
                 modifier = Modifier
@@ -179,10 +209,11 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
-                // Connection Card
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213e)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213E)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -202,7 +233,7 @@ class MainActivity : ComponentActivity() {
                                 focusedLabelColor = Color(0xFF4ECDC4),
                                 unfocusedLabelColor = Color.Gray
                             ),
-                            enabled = !isConnected
+                            enabled = !connected
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
@@ -218,43 +249,43 @@ class MainActivity : ComponentActivity() {
                                 focusedLabelColor = Color(0xFF4ECDC4),
                                 unfocusedLabelColor = Color.Gray
                             ),
-                            enabled = !isConnected
+                            enabled = !connected
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = {
-                                if (isConnected) disconnectWebSocket()
-                                else connectWebSocket(serverIp, serverPort)
+                                if (connected) disconnectWebSocket() else connectWebSocket(serverIp, serverPort)
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isConnected) Color(0xFFe74c3c) else Color(0xFF27ae60)
+                                containerColor = if (connected) Color(0xFFE74C3C) else Color(0xFF27AE60)
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            enabled = isConnected || serverIp.isNotBlank()
+                            enabled = connected || serverIp.isNotBlank()
                         ) {
-                            Text(if (isConnected) "Disconnect" else "Connect to Server")
+                            Text(if (connected) "Disconnect" else "Connect to Server")
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (isConnected) "Connected" else "Disconnected",
-                            color = if (isConnected) Color(0xFF27ae60) else Color(0xFFe74c3c),
+                            text = if (connected) "Connected" else "Disconnected",
+                            color = if (connected) Color(0xFF27AE60) else Color(0xFFE74C3C),
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                // Send Location Card
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213e)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213E)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Send Location", color = Color(0xFF4ECDC4), fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Center: $centerLat, $centerLng\nRadius: ${radiusMeters.toInt()}m",
+                            text = "Center: $centerLat, $centerLng\nRadius: ${radiusMeters.toInt()}m",
                             color = Color.Gray,
                             fontSize = 12.sp
                         )
@@ -266,42 +297,41 @@ class MainActivity : ComponentActivity() {
                             Button(
                                 onClick = { sendLocation(inside = true) },
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27ae60)),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
                                 shape = RoundedCornerShape(8.dp),
-                                enabled = isConnected
+                                enabled = connected
                             ) {
                                 Text("Send Inside", fontSize = 14.sp)
                             }
                             Button(
                                 onClick = { sendLocation(inside = false) },
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFe74c3c)),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE74C3C)),
                                 shape = RoundedCornerShape(8.dp),
-                                enabled = isConnected
+                                enabled = connected
                             ) {
                                 Text("Send Outside", fontSize = 14.sp)
                             }
                         }
-                        if (lastSent.isNotEmpty()) {
+                        if (last.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Last: $lastSent", color = Color.Gray, fontSize = 11.sp)
+                            Text(text = "Last: $last", color = Color.Gray, fontSize = 11.sp)
                         }
                     }
                 }
 
-                // Log Card
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f, fill = false)
                         .heightIn(min = 150.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213e)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16213E)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Log", color = Color(0xFF4ECDC4), fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
-                        logMessages.forEach { msg ->
+                        logs.forEach { msg ->
                             Text(
                                 text = msg,
                                 color = Color.Gray,
@@ -315,90 +345,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-class MainActivity : ComponentActivity() {
-
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private var locationCallback: LocationCallback? = null
-    private var webSocket: WebSocket? = null
-    private val okHttpClient = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
-
-    // Mutable state shared with Compose
-    private var _currentLat = mutableStateOf<Double?>(null)
-    private var _currentLng = mutableStateOf<Double?>(null)
-    private var _isConnected = mutableStateOf(false)
-    private var _isLocationEnabled = mutableStateOf(false)
-    private var _logMessages = mutableStateOf(listOf<String>())
-
-    private val deviceId: String by lazy {
-        "phone-${Build.MANUFACTURER}-${Build.MODEL}".replace(" ", "_")
-    }
-    private val deviceName: String by lazy {
-        "${Build.MANUFACTURER} ${Build.MODEL}"
-    }
-
-    private val locationPermissionRequest = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
-        if (fineGranted || coarseGranted) {
-            startLocationUpdates()
-        } else {
-            addLog("Location permission denied")
-        }
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        enableEdgeToEdge()
-        setContent {
-            GeoClientTheme {
-                GeoClientApp()
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        stopLocationUpdates()
-        disconnectWebSocket()
-    }
-
-    private fun addLog(message: String) {
-        Log.d("GeoClient", message)
-        _logMessages.value = (listOf(message) + _logMessages.value).take(20)
-    }
-
-    // ========== Location ==========
-
-    private fun requestLocationPermission() {
-        when {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                    PackageManager.PERMISSION_GRANTED -> {
-                startLocationUpdates()
-            }
-            else -> {
-                locationPermissionRequest.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
-            }
-        }
-    }
-
-    private fun startLocationUpdates() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            addLog("No location permission")
-            return
-        }
 
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY, 5000L
